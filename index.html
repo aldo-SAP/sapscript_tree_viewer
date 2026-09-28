@@ -415,6 +415,7 @@
     padding: 1px 6px 1px 2px;
   }
   .code-row:hover { background: var(--gutter); }
+  .code-row.match { background: rgba(168,86,15,0.16); }
 
   @keyframes jump-flash {
     0%, 100% { background: transparent; }
@@ -628,7 +629,7 @@ L	Identification TVA : &amp;KNA1-STCEG&amp;
 
   <section class="tree-panel">
     <div class="tree-controls">
-      <input type="text" id="searchBox" placeholder="Filter (matches highlighted, ancestors expanded)">
+      <input type="text" id="searchBox" placeholder="Filter (non-matching branches collapse, matches stay expanded)">
       <button class="ghost" id="expandAll" type="button">Expand all</button>
       <button class="ghost" id="collapseAll" type="button">Collapse all</button>
       <button class="ghost" id="toggleDesc" type="button">Show descriptions</button>
@@ -784,7 +785,6 @@ L	Identification TVA : &amp;KNA1-STCEG&amp;
     treePanelEl.classList.toggle('mode-code', isCode);
     treeEl.style.display = isCode ? 'none' : '';
     codeViewEl.style.display = isCode ? '' : 'none';
-    searchBox.style.display = isCode ? 'none' : '';
     toggleDescBtn.style.display = isCode ? 'none' : '';
     treeTipEl.textContent = isCode
       ? 'Tip: click the + / − to fold a block. Alt-click (or Shift-click) it to fold the whole branch at once.'
@@ -1517,25 +1517,78 @@ L	Identification TVA : &amp;KNA1-STCEG&amp;
     toggleDescBtn.textContent = on ? 'Hide descriptions' : 'Show descriptions';
   });
 
+  // Filtering: fold shut every branch that doesn't contain the query anywhere
+  // inside it (its row stays visible, just collapsed, so the surrounding
+  // structure and what comes after it is still there), while keeping the
+  // path down to each match (its ancestors) expanded. Nothing is ever
+  // removed from view — only folded — so the full hierarchy and sequence
+  // of lines stays intact. Applied to both the tree and the code view, in
+  // lockstep, so switching views mid-filter keeps the same filtered state.
+  function walkTreeFilter(li, q){
+    var node = li.querySelector(':scope > .node');
+    var label = node ? node.querySelector('.label') : null;
+    var selfMatch = !!(label && label.textContent.toLowerCase().indexOf(q) !== -1);
+    var childUl = li.querySelector(':scope > ul');
+    var childMatch = false;
+    if (childUl){
+      Array.prototype.forEach.call(childUl.children, function(cli){
+        if (walkTreeFilter(cli, q)) childMatch = true;
+      });
+    }
+    if (node) node.classList.toggle('match', selfMatch);
+    if (childUl) setCollapsed(li, !childMatch);
+    return selfMatch || childMatch;
+  }
+  function filterTreeView(q){
+    Array.prototype.forEach.call(treeEl.querySelectorAll(':scope > ul > li'), function(li){
+      walkTreeFilter(li, q);
+    });
+  }
+  function clearTreeFilter(){
+    treeEl.querySelectorAll('.node.match').forEach(function(n){ n.classList.remove('match'); });
+    treeEl.querySelectorAll('li').forEach(function(li){
+      if (li.querySelector(':scope > ul')) setCollapsed(li, false);
+    });
+  }
+
+  function walkCodeFilter(li, q){
+    var row = li.querySelector(':scope > .code-row');
+    var tagEl = row ? row.querySelector(':scope > .code-tag') : null;
+    var contentEl = row ? row.querySelector('.code-text-content') : null;
+    var matchText = ((tagEl ? tagEl.textContent : '') + ' ' + (contentEl ? contentEl.textContent : '')).toLowerCase();
+    var selfMatch = matchText.indexOf(q) !== -1;
+    var childUl = li.querySelector(':scope > ul');
+    var childMatch = false;
+    if (childUl){
+      Array.prototype.forEach.call(childUl.children, function(cli){
+        if (walkCodeFilter(cli, q)) childMatch = true;
+      });
+    }
+    if (row) row.classList.toggle('match', selfMatch);
+    if (childUl) setFoldCollapsed(li, !childMatch);
+    return selfMatch || childMatch;
+  }
+  function filterCodeView(q){
+    Array.prototype.forEach.call(codeViewEl.querySelectorAll(':scope > ul > li'), function(li){
+      walkCodeFilter(li, q);
+    });
+  }
+  function clearCodeFilter(){
+    codeViewEl.querySelectorAll('.code-row.match').forEach(function(r){ r.classList.remove('match'); });
+    codeViewEl.querySelectorAll('.code-item').forEach(function(li){
+      if (li.querySelector(':scope > ul')) setFoldCollapsed(li, false);
+    });
+  }
+
   searchBox.addEventListener('input', function(){
     var q = searchBox.value.trim().toLowerCase();
-    var nodes = treeEl.querySelectorAll('.node');
-    nodes.forEach(function(n){ n.classList.remove('match'); });
-    if (!q) return;
-    nodes.forEach(function(n){
-      var label = n.querySelector('.label');
-      if (label && label.textContent.toLowerCase().indexOf(q) !== -1){
-        n.classList.add('match');
-        var li = n.parentElement;
-        var parentLi = li.parentElement.closest('li');
-        while (parentLi){
-          parentLi.classList.remove('collapsed');
-          var t = parentLi.querySelector(':scope > .node > .toggle');
-          if (t) t.textContent = '\u25BE';
-          parentLi = parentLi.parentElement.closest('li');
-        }
-      }
-    });
+    if (!q){
+      clearTreeFilter();
+      clearCodeFilter();
+      return;
+    }
+    filterTreeView(q);
+    filterCodeView(q);
   });
 
 })();
